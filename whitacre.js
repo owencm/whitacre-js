@@ -18,9 +18,30 @@ const shuffleArray = (array) => {
   return array;
 }
 
+const assert = (bool, err) => {
+  if (err === undefined) {
+    err = 'Assertion failure';
+  }
+  if (!bool) {
+    throw new Error(err);
+  }
+}
+
+const zipArrays = (arrA, arrB, aLabel, bLabel) => {
+  let result = [];
+  assert(arrA.length === arrB.length);
+  for (let i = 0; i < arrA.length; i++) {
+    result.push({ [aLabel]: arrA[i], [bLabel]: arrB[i] });
+  }
+  return result;
+}
+
 const maScale = [0, 2, 4, 5, 7, 9, 11];
 const miScale = [0, 2, 3, 5, 7, 8, 10, 11];
-// const preferredNotes = [0, =]
+
+// How nice do the notes sound in a melody?
+const maScaleScored = [ 5, 0, 3, 0, 5, 1, 0, 5, 0, 1, 0, 3];
+const miScaleScored = [ 5, 0, 3, 5, 0, 1, 0, 5, 1, 0, 3, 0];
 
 const maChord = [0, 4, 7];
 const miChord = [0, 3, 7];
@@ -80,12 +101,13 @@ const isChordInKey = (chord, key) => {
 
 isChordInKey({root: 0, type: MA}, {root: 0, type: MA});
 
-const getFormattedChord = (chord, key) => {
-  const root = chord.root;
-  const type = chord.type;
-  // TODO: Keys
+const getFormattedNote = (note) => {
   const noteNames = ['A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#'];
-  return noteNames[root] + (type === MI ? 'm' : '');
+  return noteNames[note];
+}
+
+const getFormattedChord = (chord) => {
+  return getFormattedNote(chord.root) + (chord.type === MI ? 'm' : '');
 }
 
 const getRandomChordInKey = (key) => {
@@ -128,9 +150,60 @@ const generateProgression = (key, bars) => {
   }
 }
 
+const scoreMelody = (melody, progression, key) => {
+  let scoreShortDistances = (melody) => {
+    let score = 0;
+    for (let i = 0; i < melody.length - 1; i++) {
+      score += (Math.mod(melody[i] - melody[i+1]) < 4) ? 1 : 0;
+    }
+    return score / (melody.length - 1);
+  }
+  return scoreShortDistances(melody);
+}
+
+const chooseNoteAccordingToNiceness = (chord) => {
+  const scaleScored = chord.type === MA ? maScaleScored : miScaleScored;
+  const total = scaleScored.reduce((a, b) => a+b);
+  const randomN = random(0, total-1);
+  let i = 0;
+  let runningTotal = 0;
+  // console.log(scaleScored);
+  do {
+    runningTotal += scaleScored[i];
+    i++;
+    // console.log({randomN, i, runningTotal});
+  } while (i < scaleScored.length && randomN > runningTotal);
+  // console.log(`Random was ${randomN}, so chose ${i-1}`);
+  return addNotes(i - 1, chord.root);
+}
+
+const chooseNoteInKeyAccordingToNiceness = (chord, key) => {
+  let candidateNote;
+  do {
+    candidateNote = chooseNoteAccordingToNiceness(chord);
+  } while (!isNoteInKey(candidateNote, key));
+  return candidateNote;
+}
+
+const generateRandomMelody = (progression, key) => {
+  const notes = [];
+  for (let i = 0; i < progression.length; i++) {
+    notes.push(chooseNoteInKeyAccordingToNiceness(progression[i], key));
+  }
+  return notes;
+}
+
 let potentialProgression;
 do {
   potentialProgression = generateProgression(key, 16);
 } while (potentialProgression[15].root !== key.root || potentialProgression[15].type !== key.type);
 
-console.log(potentialProgression.map(getFormattedChord));
+const progression = potentialProgression;
+const melody = generateRandomMelody(progression, key);
+
+const formattedProgression = progression.map(chord => getFormattedChord(chord));
+const formattedMelody = melody.map(note => getFormattedNote(note));
+
+const piece = zipArrays(formattedProgression, formattedMelody, 'Chord', 'Note');
+
+console.log(piece);
