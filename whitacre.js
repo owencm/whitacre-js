@@ -2,7 +2,10 @@
 
 const MA = 0, MI = 1;
 
-const key = { root: 3, type: MA }
+const key = { root: 0, type: MI }
+
+const notesPerChord = 2
+const chordCount = 7
 
 const random = (from, to) => {
   return from + Math.floor(Math.random() * (to - from + 1));
@@ -40,8 +43,11 @@ const maScale = [0, 2, 4, 5, 7, 9, 11];
 const miScale = [0, 2, 3, 5, 7, 8, 10, 11];
 
 // How nice do the notes sound in a melody?
-const maScaleScored = [ 5, 0, 3, 0, 5, 1, 0, 5, 0, 1, 0, 3];
-const miScaleScored = [ 5, 0, 3, 5, 0, 1, 0, 5, 1, 0, 3, 0];
+const maScaleScored = [ 5, 0, 3, 0, 5, 10, 0, 5, 0, 2, 0, 3];
+const miScaleScored = [ 5, 0, 3, 5, 0, 2, 0, 5, 2, 0, 3, 0];
+
+// // Relative to the chord
+// const maChordIntervalScored = [ 5, 2, 5, 1, 5, 1, 1 ]
 
 const maChord = [0, 4, 7];
 const miChord = [0, 3, 7];
@@ -92,11 +98,14 @@ const areNotesInKey = (notes, key) => {
   return notes.map((note) => isNoteInKey(note, key)).reduce((a, b) => a && b);
 }
 
-const isChordInKey = (chord, key) => {
-  const chordNotes = (chord.type === MA ? maChord : miChord).map((note) =>
+const getChordNotes = (chord, key) => {
+  return (chord.type === MA ? maChord : miChord).map((note) =>
     addNotes(note, chord.root)
-  );
-  return areNotesInKey(chordNotes, key);
+  )
+}
+
+const isChordInKey = (chord, key) => {
+  return areNotesInKey(getChordNotes(chord, key), key);
 }
 
 isChordInKey({root: 0, type: MA}, {root: 0, type: MA});
@@ -150,15 +159,63 @@ const generateProgression = (key, bars) => {
   }
 }
 
+const scoreProgression = (progression, key) => {
+  const scoreFirstChordMatchesMajorMinor = () => {
+    return progression[0].type === key.type ? 1 : 0
+  }
+  const scoreLastChordIsRoot = () => {
+    const lastChord = progression[progression.length - 1]
+    return (lastChord.root === key.root) && (lastChord.type === key.type) ? 1 : 0
+  }
+  return scoreFirstChordMatchesMajorMinor() * scoreLastChordIsRoot()
+}
+//
+// const getInterval({ note, chord, key }) {
+//   (note - chord.root + 12) % 12
+//   return
+// }
+
+const average = (arr) => arr.reduce((a, b) => a + b) / arr.length
+const multiply = (arr) => arr.reduce((a, b) => a * b)
+
 const scoreMelody = (melody, progression, key) => {
-  let scoreShortDistances = (melody) => {
+  const scoreShortDistances = () => {
     let score = 0;
     for (let i = 0; i < melody.length - 1; i++) {
-      score += (Math.mod(melody[i] - melody[i+1]) < 4) ? 1 : 0;
+      score += (Math.abs(melody[i] - melody[i+1]) < 4) ? 1 : 0;
     }
     return score / (melody.length - 1);
   }
-  return scoreShortDistances(melody);
+  const scoreLastNoteRoot = () => {
+    return (melody[melody.length-1] == key.root) ? 1 : 0
+  }
+  const scoreStability = () => {
+    let stabilities = []
+    for (let i = 0; i < progression.length; i++) {
+      for (let j = 0; j < notesPerChord; j++) {
+        let chord = progression[i]
+        let note = melody[i * notesPerChord + j]
+        if (note == chord.root) {
+          stabilities.push(1)
+          continue
+        }
+        let chordNotes = getChordNotes(chord, key)
+        if (chordNotes.indexOf(note) > -1) {
+          stabilities.push(0.95)
+          continue
+        }
+        // If it's on the 1 beat
+        if (j == 0) {
+          stabilities.push(0.3)
+        } else {
+          stabilities.push(0.8)
+        }
+      }
+    }
+    console.log(stabilities)
+    return multiply(stabilities)
+  }
+  return multiply([scoreShortDistances(), scoreLastNoteRoot(), scoreStability()]);
 }
 
 const chooseNoteAccordingToNiceness = (chord) => {
@@ -185,25 +242,44 @@ const chooseNoteInKeyAccordingToNiceness = (chord, key) => {
   return candidateNote;
 }
 
-const generateRandomMelody = (progression, key) => {
+const generateRandomMelody = (progression, key, notesPerChord) => {
   const notes = [];
   for (let i = 0; i < progression.length; i++) {
-    notes.push(chooseNoteInKeyAccordingToNiceness(progression[i], key));
+    for (let j = 0; j < notesPerChord; j++) {
+      notes.push(chooseNoteInKeyAccordingToNiceness(progression[i], key));
+    }
   }
+  // Force the last note to be the root to avoid randomly generating melodies without this property
+  notes[(progression.length - 1) * 2 + 1] = key.root
   return notes;
 }
 
-let potentialProgression;
+let potentialProgression, potentialProgressionScore;
 do {
-  potentialProgression = generateProgression(key, 16);
-} while (potentialProgression[15].root !== key.root || potentialProgression[15].type !== key.type);
+  potentialProgression = generateProgression(key, chordCount);
+  potentialProgressionScore = scoreProgression(potentialProgression, key)
+} while (potentialProgressionScore < 0.6)
 
-const progression = potentialProgression;
-const melody = generateRandomMelody(progression, key);
+const progression = potentialProgression
+
+let potentialMelody, potentialMelodyScore
+do {
+  // TODO: score as we go along in segments and then score at the end
+  potentialMelody = generateRandomMelody(progression, key, notesPerChord)
+  potentialMelodyScore = scoreMelody(potentialMelody, progression, key, notesPerChord)
+} while (potentialMelodyScore < 0.4)
+
+console.log('Melody score', potentialMelodyScore)
+
+const melody = potentialMelody
 
 const formattedProgression = progression.map(chord => getFormattedChord(chord));
 const formattedMelody = melody.map(note => getFormattedNote(note));
 
-const piece = zipArrays(formattedProgression, formattedMelody, 'Chord', 'Note');
-
-console.log(piece);
+for (let i = 0; i < formattedProgression.length; i++) {
+  let notes = []
+  for (let j = 0; j < notesPerChord; j++) {
+    notes.push(formattedMelody[i * notesPerChord + j])
+  }
+  console.log(`Chords: ${formattedProgression[i]}, notes: ${notes}`)
+}
